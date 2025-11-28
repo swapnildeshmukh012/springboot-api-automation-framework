@@ -1,0 +1,605 @@
+# Complete Docker Guide - Step by Step
+
+## What is Docker?
+
+Docker is a platform that allows you to package applications and their dependencies into **containers** - lightweight, portable units that can run consistently across different environments (your laptop, test server, production, etc.).
+
+Think of it like this:
+- **Traditional approach**: "It works on my machine" problem - different OS, libraries, versions cause issues
+- **Docker approach**: Package everything together so it runs the same everywhere
+
+---
+
+## Core Concepts
+
+### 1. **Images**
+- A **Docker image** is like a blueprint or template
+- It's a read-only package containing:
+  - Operating system
+  - Application code
+  - Dependencies
+  - Configuration files
+- Images are built from instructions in a **Dockerfile**
+
+### 2. **Containers**
+- A **container** is a running instance of an image
+- Think of it as: Image = Class, Container = Object (in OOP terms)
+- Containers are:
+  - Isolated from each other and the host
+  - Lightweight (share OS kernel)
+  - Ephemeral (can be stopped/started/deleted easily)
+
+### 3. **Dockerfile**
+- A text file with instructions to build an image
+- Like a recipe that tells Docker how to create your image
+
+### 4. **Docker Registry**
+- A repository for Docker images
+- **Docker Hub** is the public registry (like GitHub for code)
+- You can pull pre-built images from here
+
+---
+
+## Docker Architecture
+
+```
+┌─────────────────────────────────────────┐
+│           Docker Client (CLI)           │
+│         (docker build, docker run)      │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│          Docker Daemon (Server)         │
+│  - Builds images                        │
+│  - Runs containers                      │
+│  - Manages networks & volumes           │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│         Containers Running              │
+│  ┌──────┐  ┌──────┐  ┌──────┐          │
+│  │ App1 │  │ App2 │  │ App3 │          │
+│  └──────┘  └──────┘  └──────┘          │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## Dockerfile Explained - Line by Line
+
+Let's break down the Dockerfile we used:
+
+```dockerfile
+FROM gradle:8.5-jdk17
+
+WORKDIR /app
+
+COPY build.gradle settings.gradle ./
+
+RUN gradle dependencies --no-daemon || true
+
+COPY src ./src
+
+CMD ["gradle", "test", "--no-daemon", "--stacktrace", "--info"]
+```
+
+### **Line 1: FROM gradle:8.5-jdk17**
+```dockerfile
+FROM gradle:8.5-jdk17
+```
+- **FROM** specifies the base image to start from
+- `gradle:8.5-jdk17` is a pre-built image from Docker Hub containing:
+  - Linux OS (usually Debian/Ubuntu)
+  - JDK 17
+  - Gradle 8.5
+- This saves you from manually installing Java and Gradle
+
+### **Line 2: WORKDIR /app**
+```dockerfile
+WORKDIR /app
+```
+- Sets the working directory inside the container to `/app`
+- All subsequent commands run from this directory
+- If `/app` doesn't exist, Docker creates it
+- Like doing `cd /app` in terminal
+
+### **Line 3: COPY build.gradle settings.gradle ./**
+```dockerfile
+COPY build.gradle settings.gradle ./
+```
+- **COPY** copies files from your local machine into the image
+- `build.gradle settings.gradle` - source files on your machine
+- `./` - destination (current working directory `/app`)
+- Why copy these first? **Docker layer caching** (explained below)
+
+### **Line 4: RUN gradle dependencies --no-daemon || true**
+```dockerfile
+RUN gradle dependencies --no-daemon || true
+```
+- **RUN** executes commands during image build
+- `gradle dependencies` - downloads all project dependencies
+- `--no-daemon` - don't start background Gradle process (not needed in containers)
+- `|| true` - continue even if this fails (some projects don't support this command)
+- This creates a separate layer with dependencies cached
+
+### **Line 5: COPY src ./src**
+```dockerfile
+COPY src ./src
+```
+- Copies your source code into the container
+- Source code changes frequently, so we copy it last
+- This preserves the dependency cache layer
+
+### **Line 6: CMD ["gradle", "test", ...]**
+```dockerfile
+CMD ["gradle", "test", "--no-daemon", "--stacktrace", "--info"]
+```
+- **CMD** defines the default command when container starts
+- This is NOT run during `docker build`
+- It runs when you do `docker run`
+- `["gradle", "test", ...]` - JSON array format (exec form)
+- `--stacktrace` - show detailed errors
+- `--info` - verbose logging
+
+---
+
+## Docker Build Process - What Happens?
+
+When you run: `docker build -t springboot-api-automation .`
+
+### Step-by-step:
+
+1. **Docker reads the Dockerfile** in current directory (`.`)
+
+2. **Creates layers** - each instruction creates a new layer:
+   ```
+   Layer 1: Base image (gradle:8.5-jdk17)
+   Layer 2: Set workdir to /app
+   Layer 3: Copy build files
+   Layer 4: Download dependencies
+   Layer 5: Copy source code
+   Layer 6: Set default command
+   ```
+
+3. **Layers are cached** - if nothing changed, Docker reuses the layer
+   - This makes rebuilds FAST
+   - Why we copy dependencies first (they change rarely)
+   - Source code copied last (changes frequently)
+
+4. **Creates final image** - all layers combined
+   - Tagged with name: `springboot-api-automation`
+   - Stored locally on your machine
+
+---
+
+## Docker Run Process - What Happens?
+
+When you run: `docker run --rm springboot-api-automation`
+
+### Step-by-step:
+
+1. **Docker checks** if image `springboot-api-automation` exists locally
+
+2. **Creates a container** from the image
+   - Allocates filesystem layer (writable)
+   - Sets up networking
+   - Isolates processes
+
+3. **Executes CMD** instruction:
+   ```bash
+   gradle test --no-daemon --stacktrace --info
+   ```
+
+4. **Runs your tests** inside isolated container:
+   - Tests execute against httpbin.org
+   - Results displayed in terminal
+   - Container has its own filesystem, network, processes
+
+5. **Container stops** when tests complete
+
+6. **`--rm` flag** automatically removes the container
+   - Without `--rm`, container stays (stopped state)
+   - Can see stopped containers: `docker ps -a`
+
+---
+
+## Common Docker Commands
+
+### **Building Images**
+```bash
+# Build image with tag
+docker build -t myapp .
+
+# Build with no cache (force rebuild)
+docker build --no-cache -t myapp .
+
+# Build with verbose output
+docker build --progress=plain -t myapp .
+
+# Build from different Dockerfile
+docker build -f Dockerfile.prod -t myapp .
+```
+
+### **Running Containers**
+```bash
+# Run container
+docker run myapp
+
+# Run and auto-remove after exit
+docker run --rm myapp
+
+# Run in background (detached)
+docker run -d myapp
+
+# Run interactively with terminal
+docker run -it myapp /bin/bash
+
+# Run with port mapping (host:container)
+docker run -p 8080:8080 myapp
+
+# Run with volume (share files)
+docker run -v $(pwd):/app myapp
+
+# Run with environment variables
+docker run -e API_URL=http://test.com myapp
+```
+
+### **Managing Containers**
+```bash
+# List running containers
+docker ps
+
+# List all containers (including stopped)
+docker ps -a
+
+# Stop a container
+docker stop <container-id>
+
+# Remove a container
+docker rm <container-id>
+
+# Remove all stopped containers
+docker container prune
+```
+
+### **Managing Images**
+```bash
+# List images
+docker images
+
+# Remove an image
+docker rmi myapp
+
+# Remove unused images
+docker image prune
+
+# See image layers/history
+docker history myapp
+
+# Inspect image details
+docker inspect myapp
+```
+
+### **Debugging**
+```bash
+# View container logs
+docker logs <container-id>
+
+# Follow logs in real-time
+docker logs -f <container-id>
+
+# Execute command in running container
+docker exec -it <container-id> /bin/bash
+
+# Copy files from container
+docker cp <container-id>:/app/results.xml ./
+
+# See container resource usage
+docker stats
+```
+
+### **Cleanup**
+```bash
+# Remove everything (containers, images, networks)
+docker system prune -a
+
+# Remove just stopped containers
+docker container prune
+
+# Remove unused images
+docker image prune
+
+# See disk usage
+docker system df
+```
+
+---
+
+## Docker Layer Caching - Important!
+
+This is why order matters in Dockerfile:
+
+### ❌ **Bad Order (slow rebuilds)**
+```dockerfile
+FROM gradle:8.5-jdk17
+COPY . .                           # Copy everything
+RUN gradle dependencies            # Download deps
+CMD ["gradle", "test"]
+```
+**Problem**: If you change ONE line of code, Docker re-copies everything and re-downloads all dependencies!
+
+### ✅ **Good Order (fast rebuilds)**
+```dockerfile
+FROM gradle:8.5-jdk17
+COPY build.gradle settings.gradle ./   # Copy deps files (rarely change)
+RUN gradle dependencies                # Download deps (cached!)
+COPY src ./src                         # Copy code (changes often)
+CMD ["gradle", "test"]
+```
+**Benefit**: Change code → only last layer rebuilds → dependencies cached!
+
+---
+
+## Docker Flags Explained
+
+### **--rm**
+```bash
+docker run --rm myapp
+```
+- Automatically removes container after it exits
+- Saves disk space
+- Good for one-time runs (like tests)
+
+### **-it**
+```bash
+docker run -it myapp /bin/bash
+```
+- `-i` = interactive (keep STDIN open)
+- `-t` = allocate pseudo-TTY (terminal)
+- Combined = you can type commands inside container
+
+### **-d (detached)**
+```bash
+docker run -d myapp
+```
+- Runs container in background
+- Returns container ID
+- Terminal is free to use
+
+### **-p (port mapping)**
+```bash
+docker run -p 8080:80 myapp
+```
+- Maps host port 8080 to container port 80
+- Access container app via `localhost:8080`
+- Format: `HOST_PORT:CONTAINER_PORT`
+
+### **-v (volume mount)**
+```bash
+docker run -v $(pwd):/app myapp
+```
+- Mounts local directory into container
+- Changes sync between host and container
+- Format: `HOST_PATH:CONTAINER_PATH`
+
+### **-e (environment variable)**
+```bash
+docker run -e API_URL=http://test.com myapp
+```
+- Sets environment variable in container
+- Your app can read it: `System.getenv("API_URL")`
+
+### **--name**
+```bash
+docker run --name my-test-container myapp
+```
+- Give container a friendly name
+- Easier to reference: `docker stop my-test-container`
+
+### **--network**
+```bash
+docker run --network mynetwork myapp
+```
+- Connect container to a specific network
+- Containers on same network can talk to each other
+
+---
+
+## Real-World Example: Your Test Framework
+
+Let's trace what happens when you run your tests:
+
+### **1. Build Command**
+```bash
+docker build -t springboot-api-automation .
+```
+
+**What Docker does:**
+1. Reads Dockerfile
+2. Pulls `gradle:8.5-jdk17` from Docker Hub (if not cached)
+3. Creates `/app` directory
+4. Copies `build.gradle` and `settings.gradle` into `/app`
+5. Runs `gradle dependencies` to download libraries
+6. Copies `src/` folder into `/app/src`
+7. Tags final image as `springboot-api-automation`
+8. Stores image locally (~1-2 GB)
+
+### **2. Run Command**
+```bash
+docker run --rm springboot-api-automation
+```
+
+**What Docker does:**
+1. Finds image `springboot-api-automation`
+2. Creates new container with isolated:
+   - Filesystem (from image)
+   - Network namespace
+   - Process space
+3. Runs: `gradle test --no-daemon --stacktrace --info`
+4. Tests execute:
+   - JUnit starts
+   - Rest Assured makes HTTP calls to httpbin.org
+   - Assertions checked
+   - Results printed to console
+5. Container exits (success/failure)
+6. `--rm` removes container automatically
+
+---
+
+## Advanced Concepts
+
+### **Multi-stage Builds**
+Reduce final image size:
+
+```dockerfile
+# Stage 1: Build
+FROM gradle:8.5-jdk17 AS builder
+WORKDIR /app
+COPY . .
+RUN gradle build --no-daemon
+
+# Stage 2: Runtime
+FROM openjdk:17-slim
+WORKDIR /app
+COPY --from=builder /app/build/libs/*.jar app.jar
+CMD ["java", "-jar", "app.jar"]
+```
+- First stage builds app (large image)
+- Second stage only has runtime (small image)
+- Final image doesn't include build tools
+
+### **Docker Compose**
+Run multiple containers together:
+
+```yaml
+# docker-compose.yml
+version: '3'
+services:
+  api-tests:
+    build: .
+    environment:
+      - API_URL=http://mock-api:8080
+  
+  mock-api:
+    image: mockserver/mockserver
+    ports:
+      - "8080:8080"
+```
+
+```bash
+docker-compose up
+```
+- Starts both containers
+- They can communicate via service names
+- Great for integration testing
+
+### **.dockerignore**
+Exclude files from build context:
+
+```
+# .dockerignore
+.git
+.gradle
+build/
+*.md
+.idea/
+```
+- Speeds up builds
+- Reduces image size
+- Like `.gitignore` for Docker
+
+---
+
+## Best Practices
+
+### ✅ **Do's**
+1. Use specific image tags: `gradle:8.5-jdk17` not `gradle:latest`
+2. Order Dockerfile layers from least to most frequently changing
+3. Use `.dockerignore` to exclude unnecessary files
+4. Use multi-stage builds for smaller production images
+5. Run as non-root user in production
+6. Use `--rm` for temporary containers
+7. Keep images small (use alpine/slim variants)
+
+### ❌ **Don'ts**
+1. Don't store secrets in images (use environment variables)
+2. Don't install unnecessary packages
+3. Don't use `latest` tag in production
+4. Don't run as root user if possible
+5. Don't copy entire project before dependencies
+
+---
+
+## Troubleshooting
+
+### **Build fails with "denied" error**
+```bash
+# Docker daemon not running
+sudo systemctl start docker  # Linux
+# or restart Docker Desktop on Mac/Windows
+```
+
+### **Container exits immediately**
+```bash
+# Check logs
+docker logs <container-id>
+
+# Run interactively to debug
+docker run -it --rm myapp /bin/bash
+```
+
+### **Out of disk space**
+```bash
+# Clean up
+docker system prune -a
+docker volume prune
+```
+
+### **Port already in use**
+```bash
+# Use different port
+docker run -p 8081:8080 myapp
+```
+
+### **Can't access files in container**
+```bash
+# Mount volume
+docker run -v $(pwd):/data myapp
+
+# Or copy files out
+docker cp <container-id>:/app/file.txt ./
+```
+
+---
+
+## Summary
+
+**Docker = Consistent, Isolated, Portable Environments**
+
+Key takeaways:
+- **Images** are templates, **containers** are running instances
+- **Dockerfile** is the recipe to build images
+- **Layers are cached** for faster rebuilds
+- **Containers are isolated** but can share networks/volumes
+- **Use for**: testing, development, production, CI/CD
+
+Your test framework benefits:
+- ✅ Same environment everywhere (no "works on my machine")
+- ✅ Easy CI/CD integration
+- ✅ Isolated test execution
+- ✅ Clean state every run
+- ✅ Version-controlled infrastructure (Dockerfile)
+
+---
+
+## Next Steps
+
+1. **Learn Docker Compose** for multi-container setups
+2. **Explore Docker Hub** for pre-built images
+3. **Set up CI/CD** with Docker (Jenkins, GitHub Actions)
+4. **Try Kubernetes** for container orchestration at scale
+5. **Practice** by Dockerizing different applications
+
+Need help with any specific Docker concept or want to dive deeper into something? Let me know!
