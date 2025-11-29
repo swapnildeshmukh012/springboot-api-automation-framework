@@ -5,6 +5,11 @@ plugins {
 group = 'com.swapnil'
 version = '0.0.1-SNAPSHOT'
 
+java {
+    sourceCompatibility = '21'
+    targetCompatibility = '21'
+}
+
 repositories {
     mavenCentral()
 }
@@ -12,8 +17,14 @@ repositories {
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
     testImplementation 'io.rest-assured:rest-assured:5.4.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.0'
 }
 
 test {
     useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
 }
